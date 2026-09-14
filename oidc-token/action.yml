@@ -1,0 +1,31 @@
+name: Forgejo OIDC token
+description: Request and mask a short-lived OIDC ID token from a Forgejo Actions job.
+
+inputs:
+  audience:
+    description: Audience accepted by the target OIDC relying party.
+    required: true
+
+outputs:
+  token:
+    description: The requested short-lived OIDC ID token.
+    value: ${{ steps.request.outputs.token }}
+
+runs:
+  using: composite
+  steps:
+    - id: request
+      name: Request OIDC token
+      shell: sh
+      env:
+        AUDIENCE: ${{ inputs.audience }}
+      run: |
+        set -eu
+        token="$(
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" |
+          jq -er '.value'
+        )"
+        echo "::add-mask::${token}"
+        printf 'token=%s\n' "${token}" >> "${GITHUB_OUTPUT}"

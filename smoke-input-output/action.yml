@@ -1,0 +1,25 @@
+name: Smoke input and output
+description: Verify composite-action inputs and outputs.
+
+inputs:
+  message:
+    description: Value returned as the message output.
+    required: false
+    default: smoke
+
+outputs:
+  message:
+    description: The supplied message.
+    value: ${{ steps.result.outputs.message }}
+
+runs:
+  using: composite
+  steps:
+    - id: result
+      name: Return message
+      shell: sh
+      env:
+        MESSAGE: ${{ inputs.message }}
+      run: |
+        set -eu
+        printf 'message=%s\n' "$MESSAGE" >> "$GITHUB_OUTPUT"
