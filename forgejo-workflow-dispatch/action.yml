@@ -1,0 +1,39 @@
+name: Forgejo workflow dispatch
+description: Dispatch a Forgejo Actions workflow at a given Git ref.
+
+inputs:
+  token:
+    description: Token authorized to dispatch the workflow.
+    required: true
+  server-url:
+    description: Forgejo server URL, without a trailing slash.
+    required: true
+  repository:
+    description: Repository in owner/name form.
+    required: true
+  workflow:
+    description: Workflow filename or ID.
+    required: true
+  ref:
+    description: Git ref at which to dispatch the workflow.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Dispatch workflow
+      shell: sh
+      env:
+        TOKEN: ${{ inputs.token }}
+        SERVER_URL: ${{ inputs.server-url }}
+        REPOSITORY: ${{ inputs.repository }}
+        WORKFLOW: ${{ inputs.workflow }}
+        REF: ${{ inputs.ref }}
+      run: |
+        set -eu
+        payload="$(jq -cn --arg ref "$REF" '{ref: $ref}')"
+        curl --fail-with-body --silent --show-error --request POST \
+          --header "Authorization: Bearer ${TOKEN}" \
+          --header 'Content-Type: application/json' \
+          --data "$payload" \
+          "${SERVER_URL%/}/api/v1/repos/${REPOSITORY}/actions/workflows/${WORKFLOW}/dispatches"

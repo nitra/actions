@@ -1,0 +1,33 @@
+name: Forgejo publish release
+description: Publish an existing Forgejo release identified by tag.
+
+inputs:
+  token:
+    description: Token authorized to edit releases.
+    required: true
+  server-url:
+    description: Forgejo server URL, without a trailing slash.
+    required: true
+  repository:
+    description: Repository in owner/name form.
+    required: true
+  tag:
+    description: Release tag.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Publish release
+      shell: sh
+      env:
+        TOKEN: ${{ inputs.token }}
+        SERVER_URL: ${{ inputs.server-url }}
+        REPOSITORY: ${{ inputs.repository }}
+        TAG: ${{ inputs.tag }}
+      run: |
+        set -eu
+        api="${SERVER_URL%/}/api/v1/repos/${REPOSITORY}/releases"
+        release="$(curl --fail-with-body --silent --show-error -H "Authorization: Bearer ${TOKEN}" "${api}/tags/${TAG}")"
+        id="$(printf '%s' "$release" | jq -er '.id')"
+        curl --fail-with-body --silent --show-error -X PATCH -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data '{"draft":false}' "${api}/${id}"

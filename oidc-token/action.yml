@@ -22,9 +22,10 @@ runs:
       run: |
         set -eu
         token="$(
-          curl --fail --silent --show-error \
+          curl --fail --silent --show-error --get \
             --header "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" |
+            --data-urlencode "audience=${AUDIENCE}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}" |
           jq -er '.value'
         )"
         echo "::add-mask::${token}"

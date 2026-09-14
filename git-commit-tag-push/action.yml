@@ -1,0 +1,63 @@
+name: Commit, tag, and push
+description: Commit selected paths when changed, then push a branch and annotated tag using a bearer token.
+
+inputs:
+  token:
+    description: Short-lived token authorized to push the branch and tag.
+    required: true
+  branch:
+    description: Destination branch.
+    required: true
+  tag:
+    description: New annotated tag to create and push.
+    required: true
+  paths:
+    description: Newline-separated paths to stage for the optional commit.
+    required: true
+  commit-message:
+    description: Commit message if staged paths changed.
+    required: true
+  author-name:
+    description: Git author name.
+    required: false
+    default: forgejo-actions[bot]
+  author-email:
+    description: Git author email.
+    required: false
+    default: forgejo-actions[bot]@users.noreply.git.7n.ai
+
+runs:
+  using: composite
+  steps:
+    - name: Commit, tag, and push
+      shell: sh
+      env:
+        TOKEN: ${{ inputs.token }}
+        BRANCH: ${{ inputs.branch }}
+        TAG: ${{ inputs.tag }}
+        PATHS: ${{ inputs.paths }}
+        COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        AUTHOR_NAME: ${{ inputs.author-name }}
+        AUTHOR_EMAIL: ${{ inputs.author-email }}
+      run: |
+        set -eu
+        test -n "$TOKEN"
+        test -n "$BRANCH"
+        test -n "$TAG"
+        ! git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null || {
+          echo "Release tag already exists: ${TAG}" >&2
+          exit 1
+        }
+        git config user.name "$AUTHOR_NAME"
+        git config user.email "$AUTHOR_EMAIL"
+        while IFS= read -r path; do
+          [ -z "$path" ] || git add -- "$path"
+        done <<EOF
+        $PATHS
+        EOF
+        if ! git diff --cached --quiet; then
+          git commit -m "$COMMIT_MESSAGE"
+        fi
+        git -c http.extraHeader="Authorization: Bearer ${TOKEN}" push origin "HEAD:${BRANCH}"
+        git tag -a "$TAG" -m "$TAG"
+        git -c http.extraHeader="Authorization: Bearer ${TOKEN}" push origin "refs/tags/${TAG}"

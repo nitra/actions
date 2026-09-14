@@ -1,0 +1,54 @@
+name: Forgejo create draft release
+description: Find or create a Forgejo draft release for a tag.
+
+inputs:
+  token:
+    description: Token authorized to create releases.
+    required: true
+  server-url:
+    description: Forgejo server URL, without a trailing slash.
+    required: true
+  repository:
+    description: Repository in owner/name form.
+    required: true
+  tag:
+    description: Existing Git tag for the release.
+    required: true
+  name:
+    description: Optional release name; defaults to tag.
+    required: false
+    default: ''
+
+outputs:
+  release-id:
+    description: Forgejo release ID.
+    value: ${{ steps.release.outputs.release-id }}
+
+runs:
+  using: composite
+  steps:
+    - id: release
+      name: Find or create draft release
+      shell: sh
+      env:
+        TOKEN: ${{ inputs.token }}
+        SERVER_URL: ${{ inputs.server-url }}
+        REPOSITORY: ${{ inputs.repository }}
+        TAG: ${{ inputs.tag }}
+        NAME: ${{ inputs.name }}
+      run: |
+        set -eu
+        api="${SERVER_URL%/}/api/v1/repos/${REPOSITORY}/releases"
+        response="$(mktemp)"
+        status="$(curl --silent --show-error -o "$response" -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "${api}/tags/${TAG}")"
+        if [ "$status" = 404 ]; then
+          [ -n "$NAME" ] || NAME="$TAG"
+          payload="$(jq -cn --arg tag "$TAG" --arg name "$NAME" '{tag_name: $tag, name: $name, draft: true}')"
+          status="$(curl --silent --show-error -o "$response" -w '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' --data "$payload" "$api")"
+        fi
+        if [ "$status" != 200 ] && [ "$status" != 201 ]; then
+          cat "$response" >&2
+          exit 1
+        fi
+        id="$(jq -er '.id' "$response")"
+        printf 'release-id=%s\n' "$id" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,62 @@
+name: Forgejo upload release assets
+description: Upload release assets and verify an existing same-named asset by SHA-256 on retry.
+
+inputs:
+  token:
+    description: Token authorized to upload release assets.
+    required: true
+  server-url:
+    description: Forgejo server URL, without a trailing slash.
+    required: true
+  repository:
+    description: Repository in owner/name form.
+    required: true
+  release-id:
+    description: Forgejo release ID.
+    required: true
+  files:
+    description: Newline-separated paths of regular files to upload.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Upload or verify assets
+      shell: sh
+      env:
+        TOKEN: ${{ inputs.token }}
+        SERVER_URL: ${{ inputs.server-url }}
+        REPOSITORY: ${{ inputs.repository }}
+        RELEASE_ID: ${{ inputs.release-id }}
+        FILES: ${{ inputs.files }}
+      run: |
+        set -eu
+        sha256() {
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi
+        }
+        api="${SERVER_URL%/}/api/v1/repos/${REPOSITORY}"
+        while IFS= read -r file; do
+          [ -z "$file" ] && continue
+          test -f "$file"
+          name="${file##*/}"
+          encoded_name="$(jq -nr --arg name "$name" '$name | @uri')"
+          response="$(mktemp)"
+          status="$(curl --silent --show-error -o "$response" -w '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" --form "attachment=@${file}" "${api}/releases/${RELEASE_ID}/assets?name=${encoded_name}")"
+          if [ "$status" = 201 ]; then
+            continue
+          fi
+          if [ "$status" != 409 ]; then
+            cat "$response" >&2
+            exit 1
+          fi
+          assets="$(curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "${api}/releases/${RELEASE_ID}/assets")"
+          asset_id="$(printf '%s' "$assets" | jq -er --arg name "$name" '.[] | select(.name == $name) | .id')"
+          existing="$(mktemp)"
+          curl --fail --silent --show-error --location -H "Authorization: Bearer ${TOKEN}" -o "$existing" "${api}/releases/${RELEASE_ID}/assets/${asset_id}"
+          test "$(sha256 "$file")" = "$(sha256 "$existing")" || {
+            echo "Existing release asset differs: ${name}" >&2
+            exit 1
+          }
+        done <<EOF
+        $FILES
+        EOF

@@ -1,0 +1,87 @@
+name: Conventional release version
+description: Determine the next strict SemVer release from conventional commits.
+
+inputs:
+  current-version:
+    description: Current strict SemVer version, without a prefix.
+    required: true
+  requested-version:
+    description: Optional exact strict SemVer version, without a prefix.
+    required: false
+    default: ''
+  tag-prefix:
+    description: Prefix of release tags.
+    required: false
+    default: v
+
+outputs:
+  release:
+    description: Whether a release should be created.
+    value: ${{ steps.version.outputs.release }}
+  version:
+    description: Selected strict SemVer version, without a prefix.
+    value: ${{ steps.version.outputs.version }}
+  tag:
+    description: Selected release tag.
+    value: ${{ steps.version.outputs.tag }}
+  bump:
+    description: major, minor, patch, initial, or manual.
+    value: ${{ steps.version.outputs.bump }}
+
+runs:
+  using: composite
+  steps:
+    - id: version
+      name: Determine release version
+      shell: sh
+      env:
+        CURRENT_VERSION: ${{ inputs.current-version }}
+        REQUESTED_VERSION: ${{ inputs.requested-version }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+      run: |
+        set -eu
+        semver='[0-9]+\.[0-9]+\.[0-9]+'
+        printf '%s' "$CURRENT_VERSION" | grep -Eq "^${semver}$"
+        printf '%s' "$TAG_PREFIX" | grep -Eq '^[A-Za-z0-9_-]+$'
+
+        if [ -n "$REQUESTED_VERSION" ]; then
+          printf '%s' "$REQUESTED_VERSION" | grep -Eq "^${semver}$"
+          version="$REQUESTED_VERSION"
+          bump=manual
+        else
+          latest="$(
+            git tag --merged HEAD --sort=-version:refname --list "${TAG_PREFIX}[0-9]*" |
+              grep -E "^${TAG_PREFIX}${semver}$" |
+              head -n 1 || true
+          )"
+          if [ -z "$latest" ]; then
+            version="$CURRENT_VERSION"
+            bump=initial
+          else
+            test "$CURRENT_VERSION" = "${latest#"$TAG_PREFIX"}"
+            subjects="$(git log "${latest}..HEAD" --format='%s')"
+            messages="$(git log "${latest}..HEAD" --format='%B')"
+            if printf '%s\n' "$messages" | grep -Eq 'BREAKING CHANGE:' || printf '%s\n' "$subjects" | grep -Eq '^[[:alnum:]][^[:space:]]*!:'; then
+              bump=major
+            elif printf '%s\n' "$subjects" | grep -Eq '^feat(\([^)]*\))?:'; then
+              bump=minor
+            elif printf '%s\n' "$subjects" | grep -Eq '^(fix|perf)(\([^)]*\))?:'; then
+              bump=patch
+            else
+              printf 'release=false\n' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            major="${CURRENT_VERSION%%.*}"
+            rest="${CURRENT_VERSION#*.}"
+            minor="${rest%%.*}"
+            patch="${rest#*.}"
+            case "$bump" in
+              major) version="$((major + 1)).0.0" ;;
+              minor) version="${major}.$((minor + 1)).0" ;;
+              patch) version="${major}.${minor}.$((patch + 1))" ;;
+            esac
+          fi
+        fi
+
+        printf 'release=true\nversion=%s\ntag=%s%s\nbump=%s\n' \
+          "$version" "$TAG_PREFIX" "$version" "$bump" >> "$GITHUB_OUTPUT"
