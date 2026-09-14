@@ -73,3 +73,11 @@ Checks input and output wiring:
 
 For production workflows, pin an action to a full commit SHA. `@v1` is a
 convenience major-version tag and must only move to compatible releases.
+
+## Versions
+
+This is a monorepo, so one release version covers every action directory.
+Publish immutable tags such as `v1.0.0`; then move the mutable `v1` tag only to
+backwards-compatible `v1.x.y` releases. Consumers normally use `@v1`, like
+`actions/checkout@v6`; security-sensitive workflows may pin the full commit
+SHA instead.
