@@ -40,23 +40,32 @@ runs:
           test -f "$file"
           name="${file##*/}"
           encoded_name="$(jq -nr --arg name "$name" '$name | @uri')"
+          assets="$(curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "${api}/releases/${RELEASE_ID}/assets?limit=100")"
+          matches="$(printf '%s' "$assets" | jq -er --arg name "$name" '[.[] | select(.name == $name)]')"
+          count="$(printf '%s' "$matches" | jq 'length')"
+          if [ "$count" -gt 1 ]; then
+            echo "Release has ${count} assets named ${name}; repair the release before retrying." >&2
+            exit 1
+          fi
+          if [ "$count" -eq 1 ]; then
+            url="$(printf '%s' "$matches" | jq -er '.[0].browser_download_url')"
+            existing="$(mktemp)"
+            curl --fail --silent --show-error --location -H "Authorization: Bearer ${TOKEN}" -o "$existing" "$url"
+            test "$(sha256 "$file")" = "$(sha256 "$existing")" || {
+              echo "Existing release asset differs: ${name}" >&2
+              exit 1
+            }
+            rm -f "$existing"
+            continue
+          fi
           response="$(mktemp)"
           status="$(curl --silent --show-error -o "$response" -w '%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" --form "attachment=@${file}" "${api}/releases/${RELEASE_ID}/assets?name=${encoded_name}")"
           if [ "$status" = 201 ]; then
+            rm -f "$response"
             continue
           fi
-          if [ "$status" != 409 ]; then
-            cat "$response" >&2
-            exit 1
-          fi
-          assets="$(curl --fail --silent --show-error -H "Authorization: Bearer ${TOKEN}" "${api}/releases/${RELEASE_ID}/assets")"
-          asset_id="$(printf '%s' "$assets" | jq -er --arg name "$name" '.[] | select(.name == $name) | .id')"
-          existing="$(mktemp)"
-          curl --fail --silent --show-error --location -H "Authorization: Bearer ${TOKEN}" -o "$existing" "${api}/releases/${RELEASE_ID}/assets/${asset_id}"
-          test "$(sha256 "$file")" = "$(sha256 "$existing")" || {
-            echo "Existing release asset differs: ${name}" >&2
-            exit 1
-          }
+          cat "$response" >&2
+          exit 1
         done <<EOF
         $FILES
         EOF
