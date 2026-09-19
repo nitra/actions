@@ -31,6 +31,7 @@ These actions compose a Forgejo release pipeline. They require a runner with
 | Action | Purpose |
 | --- | --- |
 | `conventional-release-version` | Calculate strict SemVer from conventional commits and Git tags. |
+| `cargo-set-package-version` | Update a package `Cargo.toml` and matching `Cargo.lock` entry safely. |
 | `git-commit-tag-push` | Optionally commit selected paths, then push a branch and annotated tag. |
 | `forgejo-create-draft-release` | Find or create a draft release and return its ID. |
 | `forgejo-upload-release-assets` | Upload assets or verify an already uploaded same-named asset by SHA-256. |

@@ -36,6 +36,29 @@ grep -Fx 'version=1.3.0' "$output"
 grep -Fx 'tag=v1.3.0' "$output"
 grep -Fx 'bump=minor' "$output"
 
+version_script="$(ruby -ryaml -e 'doc = YAML.load_file(ARGV.fetch(0)); puts doc.fetch("runs").fetch("steps").fetch(0).fetch("run")' "$root/cargo-set-package-version/action.yml")"
+manifest="$test_dir/Cargo.toml"
+lockfile="$test_dir/Cargo.lock"
+cat > "$manifest" <<'EOF'
+[package]
+name = "example"
+version = "1.2.3"
+EOF
+cat > "$lockfile" <<'EOF'
+version = 4
+
+[[package]]
+name = "example"
+version = "1.2.3"
+EOF
+(
+  MANIFEST_PATH="$manifest" PACKAGE_NAME=example VERSION=1.3.0 LOCKFILE_PATH="$lockfile" sh -c "$version_script"
+)
+grep -Fx 'version = "1.3.0"' "$manifest"
+grep -Fx 'version = "1.3.0"' "$lockfile"
+MANIFEST_PATH="$manifest" PACKAGE_NAME=missing VERSION=1.4.0 LOCKFILE_PATH="$lockfile" sh -c "$version_script" && exit 1
+grep -Fx 'version = "1.3.0"' "$manifest"
+
 git -C "$test_dir" init -q --bare "$test_dir/remote.git"
 git -C "$test_dir" remote add origin "$test_dir/remote.git"
 printf '%s\n' next >> "$test_dir/file"
