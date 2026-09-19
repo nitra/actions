@@ -1,0 +1,41 @@
+name: Rust zigbuild archive
+description: Build one Rust binary for a target with sccache and create a tar.gz or zip release archive.
+inputs:
+  package: { required: true, description: Cargo package name. }
+  binary: { required: true, description: Binary file name without .exe. }
+  target: { required: true, description: Rust target triple. }
+  target-directory: { required: true, description: Persistent CARGO_TARGET_DIR. }
+  archive-path: { required: true, description: Output archive path. }
+  archive-format: { required: false, default: tar.gz, description: tar.gz or zip. }
+  toolchain: { required: false, default: '1.93.0', description: Rust toolchain. }
+  sccache-directory: { required: false, default: '', description: Optional SCCACHE_DIR. }
+  sccache-cache-size: { required: false, default: 20G, description: SCCACHE_CACHE_SIZE. }
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        PACKAGE: ${{ inputs.package }}
+        BINARY: ${{ inputs.binary }}
+        TARGET: ${{ inputs.target }}
+        TARGET_DIRECTORY: ${{ inputs.target-directory }}
+        ARCHIVE_PATH: ${{ inputs.archive-path }}
+        ARCHIVE_FORMAT: ${{ inputs.archive-format }}
+        TOOLCHAIN: ${{ inputs.toolchain }}
+        SCCACHE_DIRECTORY: ${{ inputs.sccache-directory }}
+        SCCACHE_CACHE_SIZE: ${{ inputs.sccache-cache-size }}
+      run: |
+        set -eu
+        export CARGO_TARGET_DIR="$TARGET_DIRECTORY"
+        export SCCACHE_CACHE_SIZE
+        [ -z "$SCCACHE_DIRECTORY" ] || { export SCCACHE_DIR="$SCCACHE_DIRECTORY"; export RUSTC_WRAPPER="$(command -v sccache)"; }
+        mkdir -p "$CARGO_TARGET_DIR" "$(dirname "$ARCHIVE_PATH")"
+        cargo +"$TOOLCHAIN" zigbuild -p "$PACKAGE" --release --locked --target "$TARGET"
+        bin="$CARGO_TARGET_DIR/$TARGET/release/$BINARY"
+        [ "$ARCHIVE_FORMAT" != zip ] || bin="$bin.exe"
+        test -x "$bin"
+        case "$ARCHIVE_FORMAT" in
+          tar.gz) tar -C "$(dirname "$bin")" -czf "$ARCHIVE_PATH" "$(basename "$bin")" ;;
+          zip) zip -j -FS "$ARCHIVE_PATH" "$bin" ;;
+          *) echo "archive-format must be tar.gz or zip" >&2; exit 1 ;;
+        esac
