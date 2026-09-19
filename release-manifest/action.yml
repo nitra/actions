@@ -1,0 +1,26 @@
+name: Release manifest
+description: Create SHA256SUMS and MANIFEST.txt from an explicit release asset list.
+inputs:
+  files: { required: true, description: Newline-separated asset paths. }
+  title: { required: true, description: First line of MANIFEST.txt. }
+  output-directory: { required: false, default: '.', description: Directory for manifest files. }
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        FILES: ${{ inputs.files }}
+        TITLE: ${{ inputs.title }}
+        OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+      run: |
+        set -eu
+        mkdir -p "$OUTPUT_DIRECTORY"
+        : > "$OUTPUT_DIRECTORY/SHA256SUMS"
+        while IFS= read -r file; do
+          [ -z "$file" ] && continue
+          test -f "$file"
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum "$file"; else shasum -a 256 "$file"; fi
+        done <<EOF > "$OUTPUT_DIRECTORY/SHA256SUMS"
+        $FILES
+        EOF
+        { printf '%s\n\n' "$TITLE"; cat "$OUTPUT_DIRECTORY/SHA256SUMS"; } > "$OUTPUT_DIRECTORY/MANIFEST.txt"

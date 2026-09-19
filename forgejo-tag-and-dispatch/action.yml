@@ -1,0 +1,31 @@
+name: Forgejo tag and dispatch
+description: Create one annotated release tag from HEAD and dispatch the tag workflow.
+inputs:
+  token: { required: true, description: Short-lived token authorized to push a tag and dispatch. }
+  server-url: { required: true, description: Forgejo server URL. }
+  repository: { required: true, description: Repository in owner/name form. }
+  tag: { required: true, description: Strict vX.Y.Z tag. }
+  workflow: { required: true, description: Workflow filename to dispatch at the tag. }
+  expected-commit-message: { required: true, description: Exact expected HEAD subject. }
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        TOKEN: ${{ inputs.token }}
+        SERVER_URL: ${{ inputs.server-url }}
+        REPOSITORY: ${{ inputs.repository }}
+        TAG: ${{ inputs.tag }}
+        WORKFLOW: ${{ inputs.workflow }}
+        EXPECTED: ${{ inputs.expected-commit-message }}
+      run: |
+        set -eu
+        test "$(git log -1 --format=%s)" = "$EXPECTED"
+        if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+          test "$(git rev-parse "$TAG^{}")" = "$(git rev-parse HEAD)"
+        else
+          git tag -a "$TAG" -m "$TAG"
+          git -c http.extraHeader="Authorization: Bearer $TOKEN" push origin "refs/tags/$TAG"
+        fi
+        payload="$(jq -cn --arg ref "$TAG" '{ref:$ref}')"
+        curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data "$payload" "${SERVER_URL%/}/api/v1/repos/$REPOSITORY/actions/workflows/$WORKFLOW/dispatches"

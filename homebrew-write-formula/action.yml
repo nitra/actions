@@ -1,0 +1,86 @@
+name: Write standard Homebrew formula
+description: Write and push a standard macOS ARM64 and Linux x86_64/ARM64 binary formula.
+inputs:
+  token: { required: true, description: Token authorized to update the tap. }
+  tap-url: { required: true, description: Authenticated clone URL without credentials. }
+  formula-name: { required: true, description: Homebrew formula name. }
+  class-name: { required: true, description: Ruby formula class name. }
+  description: { required: true, description: Formula description. }
+  homepage: { required: true, description: Formula homepage. }
+  license: { required: true, description: Formula license. }
+  version: { required: true, description: Formula version without v. }
+  binary: { required: true, description: Installed binary name. }
+  macos-url: { required: true, description: macOS ARM64 archive URL. }
+  macos-sha256: { required: true, description: macOS ARM64 SHA-256. }
+  linux-x86-64-url: { required: true, description: Linux x86_64 archive URL. }
+  linux-x86-64-sha256: { required: true, description: Linux x86_64 SHA-256. }
+  linux-arm64-url: { required: true, description: Linux ARM64 archive URL. }
+  linux-arm64-sha256: { required: true, description: Linux ARM64 SHA-256. }
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        TOKEN: ${{ inputs.token }}
+        TAP_URL: ${{ inputs.tap-url }}
+        NAME: ${{ inputs.formula-name }}
+        CLASS: ${{ inputs.class-name }}
+        DESCRIPTION: ${{ inputs.description }}
+        HOMEPAGE: ${{ inputs.homepage }}
+        LICENSE: ${{ inputs.license }}
+        VERSION: ${{ inputs.version }}
+        BINARY: ${{ inputs.binary }}
+        MAC_URL: ${{ inputs.macos-url }}
+        MAC_SHA: ${{ inputs.macos-sha256 }}
+        X64_URL: ${{ inputs.linux-x86-64-url }}
+        X64_SHA: ${{ inputs.linux-x86-64-sha256 }}
+        ARM_URL: ${{ inputs.linux-arm64-url }}
+        ARM_SHA: ${{ inputs.linux-arm64-sha256 }}
+      run: |
+        set -eu
+        printf '%s' "$NAME" | grep -Eq '^[a-z0-9][a-z0-9_-]*$'
+        dir="$(mktemp -d)"
+        trap 'rm -rf "$dir"' EXIT
+        git -c http.extraHeader="Authorization: Bearer $TOKEN" clone "$TAP_URL" "$dir/tap"
+        cd "$dir/tap"
+        mkdir -p Formula
+        cat > "Formula/$NAME.rb" <<EOF
+        class $CLASS < Formula
+          desc "$DESCRIPTION"
+          homepage "$HOMEPAGE"
+          version "$VERSION"
+          license "$LICENSE"
+          on_macos do
+            if Hardware::CPU.arm?
+              url "$MAC_URL"
+              sha256 "$MAC_SHA"
+            else
+              odie "$NAME: Intel macOS is not supported"
+            end
+          end
+          on_linux do
+            if Hardware::CPU.intel?
+              url "$X64_URL"
+              sha256 "$X64_SHA"
+            elsif Hardware::CPU.arm?
+              url "$ARM_URL"
+              sha256 "$ARM_SHA"
+            else
+              odie "$NAME: this Linux architecture is not supported"
+            end
+          end
+          def install
+            bin.install "$BINARY"
+          end
+          test do
+            system "#{bin}/$BINARY", "--help"
+          end
+        end
+        EOF
+        git add "Formula/$NAME.rb"
+        git diff --cached --check
+        git diff --cached --quiet && exit 0
+        git config user.name forgejo-actions[bot]
+        git config user.email forgejo-actions[bot]@users.noreply.git.7n.ai
+        git commit -m "$NAME $VERSION"
+        git -c http.extraHeader="Authorization: Bearer $TOKEN" push origin HEAD:main

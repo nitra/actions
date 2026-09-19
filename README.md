@@ -32,6 +32,13 @@ These actions compose a Forgejo release pipeline. They require a runner with
 | --- | --- |
 | `conventional-release-version` | Calculate strict SemVer from conventional commits and Git tags. |
 | `cargo-set-package-version` | Update a package `Cargo.toml` and matching `Cargo.lock` entry safely. |
+| `forgejo-create-release-pr` | Create or reuse a versioned release branch and pull request. |
+| `forgejo-tag-and-dispatch` | Create an annotated release tag and dispatch its release workflow. |
+| `release-manifest` | Produce `SHA256SUMS` and `MANIFEST.txt` for explicit assets. |
+| `artifact-publish-release-assets` | Publish and verify immutable public Artifact Gateway assets. |
+| `homebrew-write-formula` | Write and push a standard multi-architecture Homebrew formula. |
+| `rust-zigbuild-archive` | Build and archive one Rust target with optional sccache. |
+| `macos-codesign` | Sign and verify one macOS binary. |
 | `git-commit-tag-push` | Optionally commit selected paths, then push a branch and annotated tag. |
 | `forgejo-create-draft-release` | Find or create a draft release and return its ID. |
 | `forgejo-upload-release-assets` | Upload assets or verify an already uploaded same-named asset by SHA-256. |

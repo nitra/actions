@@ -1,0 +1,34 @@
+name: Publish Artifact Gateway release assets
+description: Publish selected assets as an immutable public Artifact Gateway version and verify each URL.
+inputs:
+  files: { required: true, description: Newline-separated regular files to publish. }
+  project: { required: true, description: Artifact Gateway project name. }
+  public-base-url: { required: false, default: https://7n.ai/artifacts, description: Public Artifact Gateway base URL. }
+outputs:
+  url:
+    description: Immutable public directory URL.
+    value: ${{ steps.publish.outputs.url }}
+  version:
+    description: Generated Artifact Gateway version.
+    value: ${{ steps.publish.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: publish
+      shell: sh
+      env:
+        FILES: ${{ inputs.files }}
+        PROJECT: ${{ inputs.project }}
+        PUBLIC_BASE_URL: ${{ inputs.public-base-url }}
+      run: |
+        set -eu
+        staging="$(mktemp -d)"
+        trap 'rm -rf "$staging"' EXIT
+        while IFS= read -r file; do [ -z "$file" ] || { test -f "$file"; cp "$file" "$staging/"; }; done <<EOF
+        $FILES
+        EOF
+        version="$(artifact uuid)"
+        artifact publish "$staging" --project "$PROJECT" --version "$version" --public --force
+        url="${PUBLIC_BASE_URL%/}/$PROJECT/$version"
+        for file in "$staging"/*; do curl --fail --location --silent --show-error --output /dev/null "$url/$(basename "$file")"; done
+        printf 'url=%s\nversion=%s\n' "$url" "$version" >> "$GITHUB_OUTPUT"

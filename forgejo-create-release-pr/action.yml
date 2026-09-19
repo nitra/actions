@@ -1,0 +1,46 @@
+name: Forgejo create release pull request
+description: Commit prepared release files to release/vX.Y.Z and create or reuse its Forgejo pull request.
+inputs:
+  token: { required: true, description: Short-lived token authorized for the source repository. }
+  server-url: { required: true, description: Forgejo server URL. }
+  repository: { required: true, description: Source repository in owner/name form. }
+  tag: { required: true, description: New vX.Y.Z tag. }
+  paths: { required: true, description: Newline-separated prepared version files to commit. }
+  base: { required: false, default: main, description: Pull request base branch. }
+  commit-message: { required: true, description: Release commit message. }
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        TOKEN: ${{ inputs.token }}
+        SERVER_URL: ${{ inputs.server-url }}
+        REPOSITORY: ${{ inputs.repository }}
+        TAG: ${{ inputs.tag }}
+        PATHS: ${{ inputs.paths }}
+        BASE: ${{ inputs.base }}
+        COMMIT_MESSAGE: ${{ inputs.commit-message }}
+      run: |
+        set -eu
+        branch="release/$TAG"
+        git config user.name forgejo-actions[bot]
+        git config user.email forgejo-actions[bot]@users.noreply.git.7n.ai
+        if git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null; then
+          git fetch origin "$branch"
+        else
+          git switch -c "$branch"
+          while IFS= read -r path; do [ -z "$path" ] || git add -- "$path"; done <<EOF
+        $PATHS
+        EOF
+          git diff --cached --quiet && { echo "Prepared release files have no changes." >&2; exit 1; }
+          git commit -m "$COMMIT_MESSAGE"
+          git -c http.extraHeader="Authorization: Bearer $TOKEN" push origin "HEAD:$branch"
+        fi
+        api="${SERVER_URL%/}/api/v1/repos/$REPOSITORY/pulls"
+        existing="$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" "$api?state=open&limit=100")"
+        count="$(printf '%s' "$existing" | jq --arg branch "$branch" '[.[] | select(.head.ref == $branch)] | length')"
+        [ "$count" -le 1 ] || { echo "More than one open release PR for $branch." >&2; exit 1; }
+        [ "$count" -eq 1 ] && exit 0
+        body="Automated release preparation. Merging this PR creates tag $TAG and starts the release."
+        payload="$(jq -cn --arg title "$COMMIT_MESSAGE" --arg head "$branch" --arg base "$BASE" --arg body "$body" '{title:$title,head:$head,base:$base,body:$body}')"
+        curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data "$payload" "$api"

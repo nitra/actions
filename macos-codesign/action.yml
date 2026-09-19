@@ -1,0 +1,19 @@
+name: macOS codesign
+description: Sign and strictly verify one macOS binary with Developer ID.
+inputs:
+  binary-path: { required: true, description: Path to the binary. }
+  identifier: { required: true, description: Bundle identifier. }
+  signing-identity: { required: true, description: Keychain signing identity. }
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        BINARY: ${{ inputs.binary-path }}
+        IDENTIFIER: ${{ inputs.identifier }}
+        IDENTITY: ${{ inputs.signing-identity }}
+      run: |
+        set -eu
+        test -x "$BINARY"
+        codesign --force --options runtime --timestamp --identifier "$IDENTIFIER" --sign "$IDENTITY" "$BINARY"
+        codesign --verify --strict --verbose=2 "$BINARY"
