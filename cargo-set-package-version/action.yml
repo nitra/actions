@@ -1,0 +1,53 @@
+name: Set Cargo package version
+description: Update one Cargo package manifest and its matching Cargo.lock entry using a strict SemVer version.
+
+inputs:
+  manifest-path:
+    description: Path to the package Cargo.toml.
+    required: true
+  package-name:
+    description: Cargo package name whose lockfile entry must be updated.
+    required: true
+  version:
+    description: Strict semantic version without a v prefix.
+    required: true
+  lockfile-path:
+    description: Optional Cargo.lock path. Leave empty when no lockfile update is needed.
+    required: false
+    default: Cargo.lock
+
+runs:
+  using: composite
+  steps:
+    - name: Update package version
+      shell: sh
+      env:
+        MANIFEST_PATH: ${{ inputs.manifest-path }}
+        PACKAGE_NAME: ${{ inputs.package-name }}
+        VERSION: ${{ inputs.version }}
+        LOCKFILE_PATH: ${{ inputs.lockfile-path }}
+      run: |
+        set -eu
+        printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        printf '%s' "$PACKAGE_NAME" | grep -Eq '^[A-Za-z0-9_-]+$'
+        test -f "$MANIFEST_PATH"
+        manifest_matches="$(grep -Ec '^version = "[0-9]+\.[0-9]+\.[0-9]+"$' "$MANIFEST_PATH" || true)"
+        test "$manifest_matches" -eq 1
+
+        if [ -n "$LOCKFILE_PATH" ]; then
+          test -f "$LOCKFILE_PATH"
+          lock_matches="$(PACKAGE_NAME="$PACKAGE_NAME" perl -0777 -ne '
+            my $name = $ENV{PACKAGE_NAME};
+            my $count = () = /(\[\[package\]\]\nname = "\Q$name\E"\nversion = ")[^"]+/g;
+            print $count;
+          ' "$LOCKFILE_PATH")"
+          test "$lock_matches" -eq 1
+        fi
+
+        VERSION="$VERSION" perl -0pi -e 's/^version = "[0-9]+\.[0-9]+\.[0-9]+"$/q{version = "} . $ENV{VERSION} . q{"}/me' "$MANIFEST_PATH"
+        [ -z "$LOCKFILE_PATH" ] && exit 0
+        PACKAGE_NAME="$PACKAGE_NAME" VERSION="$VERSION" perl -0pi -e '
+          my $name = $ENV{PACKAGE_NAME};
+          my $count = s/(\[\[package\]\]\nname = "\Q$name\E"\nversion = ")[^"]+/$1 . $ENV{VERSION}/ge;
+          die "Cargo.lock entry disappeared for $name\n" unless $count == 1;
+        ' "$LOCKFILE_PATH"
