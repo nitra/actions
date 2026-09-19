@@ -20,7 +20,16 @@ runs:
         EXPECTED: ${{ inputs.expected-commit-message }}
       run: |
         set -eu
-        test "$(git log -1 --format=%s)" = "$EXPECTED"
+        # A protected branch can preserve the release commit directly or create
+        # a Forgejo merge commit. In the latter case, tag the merge commit only
+        # when one of its immediate parents is the exact prepared release commit.
+        if [ "$(git log -1 --format=%s)" != "$EXPECTED"; then
+          found=false
+          for parent in $(git log -1 --format=%P); do
+            [ "$(git log -1 --format=%s "$parent")" = "$EXPECTED" ] && found=true
+          done
+          [ "$found" = true ] || { echo "HEAD is not the prepared release commit or its merge commit." >&2; exit 1; }
+        fi
         if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
           test "$(git rev-parse "$TAG^{}")" = "$(git rev-parse HEAD)"
         else
