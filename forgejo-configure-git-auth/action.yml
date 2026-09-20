@@ -1,0 +1,19 @@
+name: Configure Forgejo Git authentication
+description: Configure the checked-out repository so child Git commands can use a short-lived Forgejo bearer token.
+inputs:
+  token:
+    required: true
+    description: Short-lived token authorized to read the required Forgejo repositories.
+  server-url:
+    required: true
+    description: Forgejo server base URL.
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        TOKEN: ${{ inputs.token }}
+        SERVER_URL: ${{ inputs.server-url }}
+      run: |
+        set -eu
+        git config --local "http.${SERVER_URL%/}/.extraHeader" "Authorization: Bearer ${TOKEN}"
