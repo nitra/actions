@@ -23,7 +23,7 @@ runs:
         # A protected branch can preserve the release commit directly or create
         # a Forgejo merge commit. In the latter case, tag the merge commit only
         # when one of its immediate parents is the exact prepared release commit.
-        if [ "$(git log -1 --format=%s)" != "$EXPECTED"; then
+        if [ "$(git log -1 --format=%s)" != "$EXPECTED" ]; then
           found=false
           for parent in $(git log -1 --format=%P); do
             [ "$(git log -1 --format=%s "$parent")" = "$EXPECTED" ] && found=true
