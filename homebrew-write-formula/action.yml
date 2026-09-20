@@ -10,6 +10,10 @@ inputs:
   license: { required: true, description: Formula license. }
   version: { required: true, description: Formula version without v. }
   binary: { required: true, description: Installed binary name. }
+  archive-binary:
+    required: false
+    default: ''
+    description: Binary name inside each release archive; defaults to binary.
   macos-url: { required: true, description: macOS ARM64 archive URL. }
   macos-sha256: { required: true, description: macOS ARM64 SHA-256. }
   linux-x86-64-url: { required: true, description: Linux x86_64 archive URL. }
@@ -30,6 +34,7 @@ runs:
         LICENSE: ${{ inputs.license }}
         VERSION: ${{ inputs.version }}
         BINARY: ${{ inputs.binary }}
+        ARCHIVE_BINARY: ${{ inputs.archive-binary }}
         MAC_URL: ${{ inputs.macos-url }}
         MAC_SHA: ${{ inputs.macos-sha256 }}
         X64_URL: ${{ inputs.linux-x86-64-url }}
@@ -39,6 +44,7 @@ runs:
       run: |
         set -eu
         printf '%s' "$NAME" | grep -Eq '^[a-z0-9][a-z0-9_-]*$'
+        [ -n "$ARCHIVE_BINARY" ] || ARCHIVE_BINARY="$BINARY"
         dir="$(mktemp -d)"
         trap 'rm -rf "$dir"' EXIT
         git -c http.extraHeader="Authorization: Bearer $TOKEN" clone "$TAP_URL" "$dir/tap"
@@ -70,7 +76,7 @@ runs:
             end
           end
           def install
-            bin.install "$BINARY"
+            bin.install "$ARCHIVE_BINARY" => "$BINARY"
           end
           test do
             system "#{bin}/$BINARY", "--help"
