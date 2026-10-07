@@ -71,6 +71,125 @@ test "$(git -C "$test_dir" log -1 --format=%s)" = 'release v1.3.0'
 test "$(git -C "$test_dir/remote.git" rev-parse refs/heads/main)" = "$(git -C "$test_dir" rev-parse HEAD)"
 test -n "$(git -C "$test_dir/remote.git" rev-parse refs/tags/v1.3.0)"
 
+tag_dispatch_script="$(ruby -ryaml -e 'doc = YAML.load_file(ARGV.fetch(0)); puts doc.fetch("runs").fetch("steps").fetch(0).fetch("run")' "$root/forgejo-tag-and-dispatch/action.yml")"
+tag_mock_bin="$test_dir/tag-mock-bin"
+mkdir "$tag_mock_bin"
+tag_curl_log="$test_dir/tag-curl.log"
+cat > "$tag_mock_bin/curl" <<'EOF'
+#!/bin/sh
+set -eu
+
+printf '%s\n' "$*" >> "$TAG_CURL_LOG"
+EOF
+chmod +x "$tag_mock_bin/curl"
+
+init_tag_repo() {
+  repo="$1"
+  git init -q "$repo"
+  git -C "$repo" config user.name test
+  git -C "$repo" config user.email test@example.invalid
+  printf '%s\n' initial > "$repo/file"
+  git -C "$repo" add file
+  git -C "$repo" commit -qm initial
+  git -C "$repo" branch -M main
+  git -C "$repo" init -q --bare "$repo/remote.git"
+  git -C "$repo" remote add origin "$repo/remote.git"
+  git -C "$repo" push -qu origin main
+}
+
+release_commit() {
+  repo="$1"
+  subject="$2"
+  printf '%s\n' "$subject" >> "$repo/file"
+  git -C "$repo" add file
+  git -C "$repo" commit -qm "$subject"
+}
+
+run_tag_dispatch() {
+  repo="$1"
+  tag="$2"
+  expected="$3"
+  (
+    cd "$repo"
+    TOKEN=dummy SERVER_URL=https://forgejo.example REPOSITORY=owner/repo TAG="$tag" WORKFLOW=release.yml EXPECTED="$expected" TAG_CURL_LOG="$tag_curl_log" PATH="$tag_mock_bin:$PATH" sh -c "$tag_dispatch_script"
+  )
+}
+
+assert_tag_points_at_head() {
+  repo="$1"
+  tag="$2"
+  test "$(git -C "$repo" rev-parse "$tag^{}")" = "$(git -C "$repo" rev-parse HEAD)"
+}
+
+# A protected branch can retain the prepared release commit directly.
+direct_repo="$test_dir/tag-direct"
+direct_subject='chore(release): v2.0.0'
+init_tag_repo "$direct_repo"
+release_commit "$direct_repo" "$direct_subject"
+run_tag_dispatch "$direct_repo" v2.0.0 "$direct_subject"
+assert_tag_points_at_head "$direct_repo" v2.0.0
+
+# A normal PR merge has the prepared release commit directly on the PR side.
+merge_repo="$test_dir/tag-merge"
+merge_subject='chore(release): v2.0.1'
+init_tag_repo "$merge_repo"
+git -C "$merge_repo" switch -qc release/v2.0.1
+release_commit "$merge_repo" "$merge_subject"
+git -C "$merge_repo" switch -q main
+git -C "$merge_repo" merge --no-ff --no-edit release/v2.0.1
+run_tag_dispatch "$merge_repo" v2.0.1 "$merge_subject"
+assert_tag_points_at_head "$merge_repo" v2.0.1
+
+# A no-force merge of main into the release branch puts the prepared commit
+# below an integration merge, but it remains exclusive to the PR ancestry.
+integration_repo="$test_dir/tag-integration"
+integration_subject='chore(release): v2.0.2'
+init_tag_repo "$integration_repo"
+git -C "$integration_repo" switch -qc release/v2.0.2
+release_commit "$integration_repo" "$integration_subject"
+git -C "$integration_repo" switch -q main
+printf '%s\n' main > "$integration_repo/main-only"
+git -C "$integration_repo" add main-only
+git -C "$integration_repo" commit -qm 'fix: main integration'
+git -C "$integration_repo" switch -q release/v2.0.2
+git -C "$integration_repo" merge --no-ff --no-edit main
+git -C "$integration_repo" switch -q main
+git -C "$integration_repo" merge --no-ff --no-edit release/v2.0.2
+run_tag_dispatch "$integration_repo" v2.0.2 "$integration_subject"
+assert_tag_points_at_head "$integration_repo" v2.0.2
+
+# A CI-retrigger commit after that integration must not invalidate the tag.
+retrigger_repo="$test_dir/tag-retrigger"
+retrigger_subject='chore(release): v2.0.3'
+init_tag_repo "$retrigger_repo"
+git -C "$retrigger_repo" switch -qc release/v2.0.3
+release_commit "$retrigger_repo" "$retrigger_subject"
+git -C "$retrigger_repo" switch -q main
+printf '%s\n' main > "$retrigger_repo/main-only"
+git -C "$retrigger_repo" add main-only
+git -C "$retrigger_repo" commit -qm 'fix: main integration'
+git -C "$retrigger_repo" switch -q release/v2.0.3
+git -C "$retrigger_repo" merge --no-ff --no-edit main
+git -C "$retrigger_repo" commit --allow-empty -qm 'ci: retrigger required PR validation'
+git -C "$retrigger_repo" switch -q main
+git -C "$retrigger_repo" merge --no-ff --no-edit release/v2.0.3
+run_tag_dispatch "$retrigger_repo" v2.0.3 "$retrigger_subject"
+assert_tag_points_at_head "$retrigger_repo" v2.0.3
+
+# An expected release subject in base history alone must never authorize a tag.
+base_only_repo="$test_dir/tag-base-only"
+base_only_subject='chore(release): v2.0.4'
+init_tag_repo "$base_only_repo"
+release_commit "$base_only_repo" "$base_only_subject"
+git -C "$base_only_repo" switch -qc unrelated
+printf '%s\n' unrelated > "$base_only_repo/unrelated"
+git -C "$base_only_repo" add unrelated
+git -C "$base_only_repo" commit -qm 'fix: unrelated change'
+git -C "$base_only_repo" switch -q main
+git -C "$base_only_repo" merge --no-ff --no-edit unrelated
+run_tag_dispatch "$base_only_repo" v2.0.4 "$base_only_subject" && exit 1
+! git -C "$base_only_repo" rev-parse --verify --quiet refs/tags/v2.0.4 >/dev/null
+
 upload_script="$(ruby -ryaml -e 'doc = YAML.load_file(ARGV.fetch(0)); puts doc.fetch("runs").fetch("steps").fetch(0).fetch("run")' "$root/forgejo-upload-release-assets/action.yml")"
 mock_bin="$test_dir/mock-bin"
 mkdir "$mock_bin"

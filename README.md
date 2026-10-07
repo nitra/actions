@@ -50,6 +50,13 @@ there is no releasable commit. The other release actions mutate Git or Forgejo;
 use them only in workflows protected by an appropriately scoped OIDC
 integration.
 
+`forgejo-tag-and-dispatch` tags either a direct prepared release commit or a
+two-parent PR merge commit. For a merge commit, it requires exactly one commit
+with the expected release subject in the PR-only ancestry, excluding the base
+branch. Release PRs may therefore integrate current `main` without force or
+gain a CI-retrigger commit without making an unrelated base-branch commit
+taggable.
+
 ```yaml
 - id: version
   uses: nitra/actions/conventional-release-version@v1
