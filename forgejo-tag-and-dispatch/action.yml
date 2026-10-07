@@ -6,7 +6,7 @@ inputs:
   repository: { required: true, description: Repository in owner/name form. }
   tag: { required: true, description: Strict vX.Y.Z tag. }
   workflow: { required: true, description: Workflow filename to dispatch at the tag. }
-  expected-commit-message: { required: true, description: Exact expected HEAD subject. }
+  expected-commit-message: { required: true, description: Exact prepared release commit subject. }
 runs:
   using: composite
   steps:
@@ -20,16 +20,44 @@ runs:
         EXPECTED: ${{ inputs.expected-commit-message }}
       run: |
         set -eu
-        # A protected branch can preserve the release commit directly or create
-        # a Forgejo merge commit. In the latter case, tag the merge commit only
-        # when one of its immediate parents is the exact prepared release commit.
-        if [ "$(git log -1 --format=%s)" != "$EXPECTED" ]; then
-          found=false
-          for parent in $(git log -1 --format=%P); do
-            [ "$(git log -1 --format=%s "$parent")" = "$EXPECTED" ] && found=true
-          done
-          [ "$found" = true ] || { echo "HEAD is not the prepared release commit or its merge commit." >&2; exit 1; }
-        fi
+        # A protected branch can preserve the release commit directly. When
+        # Forgejo creates a merge commit, inspect only the commits introduced
+        # by the PR head (second parent), not the base branch (first parent).
+        # This permits a no-force main integration or a CI-retrigger commit on
+        # the release branch while refusing an expected subject found only in
+        # the base history.
+        parents="$(git log -1 --format=%P)"
+        set -- $parents
+        case "$#" in
+          1)
+            [ "$(git log -1 --format=%s)" = "$EXPECTED" ] || {
+              echo "HEAD is not the prepared release commit." >&2
+              exit 1
+            }
+            ;;
+          2)
+            base="$1"
+            pr_head="$2"
+            prepared=''
+            for commit in $(git rev-list "$pr_head" "^$base"); do
+              if [ "$(git log -1 --format=%s "$commit")" = "$EXPECTED" ]; then
+                [ -z "$prepared" ] || {
+                  echo "PR head contains multiple prepared release commits." >&2
+                  exit 1
+                }
+                prepared="$commit"
+              fi
+            done
+            [ -n "$prepared" ] || {
+              echo "PR head does not contain the prepared release commit." >&2
+              exit 1
+            }
+            ;;
+          *)
+            echo "HEAD must be a release commit or a two-parent PR merge commit." >&2
+            exit 1
+            ;;
+        esac
         if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
           test "$(git rev-parse "$TAG^{}")" = "$(git rev-parse HEAD)"
         else
