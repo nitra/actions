@@ -240,3 +240,7 @@ test ! -s "$curl_log"
 : > "$curl_log"
 MOCK_ASSETS='[{"name":"foc.tar.gz","browser_download_url":"https://downloads.example/foc.tar.gz"}]' MOCK_EXISTING='different asset' run_upload_action && exit 1
 test ! -s "$curl_log"
+
+# Типовий Rust toolchain має збігатися зі стандартом раннерів (лише для нього встановлені linux-цілі).
+zigbuild_toolchain="$(ruby -ryaml -e 'doc = YAML.load_file(ARGV.fetch(0)); puts doc.fetch("inputs").fetch("toolchain").fetch("default")' "$root/rust-zigbuild-archive/action.yml")"
+test "$zigbuild_toolchain" = 1.99.0

@@ -73,6 +73,23 @@ taggable.
     commit-message: "chore(release): ${{ steps.version.outputs.tag }}"
 ```
 
+`rust-zigbuild-archive` runs `cargo +<toolchain> zigbuild`. Its `toolchain`
+input defaults to `1.99.0`, the standard Rust toolchain on our runners; the
+runner must have the requested `target` installed for that toolchain, otherwise
+the build fails with `can't find crate for core`. Override `toolchain` only
+together with a runner that provides that toolchain and target:
+
+```yaml
+- uses: nitra/actions/rust-zigbuild-archive@v1
+  with:
+    package: my-cli
+    binary: my-cli
+    target: x86_64-unknown-linux-musl
+    target-directory: /cache/target
+    archive-path: dist/my-cli-x86_64-unknown-linux-musl.tar.gz
+    toolchain: 1.99.0
+```
+
 ## Smoke input and output
 
 Checks input and output wiring:
