@@ -7,7 +7,7 @@ inputs:
   target-directory: { required: true, description: Persistent CARGO_TARGET_DIR. }
   archive-path: { required: true, description: Output archive path. }
   archive-format: { required: false, default: tar.gz, description: tar.gz or zip. }
-  toolchain: { required: false, default: '1.93.0', description: Rust toolchain. }
+  toolchain: { required: false, default: '1.99.0', description: Rust toolchain passed to cargo +TOOLCHAIN; it must have the requested target installed. }
   sccache-directory: { required: false, default: '', description: Optional SCCACHE_DIR. }
   sccache-cache-size: { required: false, default: 20G, description: SCCACHE_CACHE_SIZE. }
 runs:
