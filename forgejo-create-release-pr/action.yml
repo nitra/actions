@@ -1,5 +1,5 @@
 name: Forgejo create release pull request
-description: Commit prepared release files to release/vX.Y.Z and create or reuse its Forgejo pull request.
+description: Commit prepared release files to release/vX.Y.Z and create or refresh its Forgejo pull request.
 inputs:
   token: { required: true, description: Short-lived token authorized for the source repository. }
   server-url: { required: true, description: Forgejo server URL. }
@@ -25,21 +25,69 @@ runs:
         branch="release/$TAG"
         git config user.name forgejo-actions[bot]
         git config user.email forgejo-actions[bot]@users.noreply.git.7n.ai
-        if git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null; then
-          git fetch origin "$branch"
-        else
-          git switch -c "$branch"
-          while IFS= read -r path; do [ -z "$path" ] || git add -- "$path"; done <<EOF
-        $PATHS
-        EOF
-          git diff --cached --quiet && { echo "Prepared release files have no changes." >&2; exit 1; }
-          git commit -m "$COMMIT_MESSAGE"
-          git -c http.extraHeader="Authorization: Bearer $TOKEN" push origin "HEAD:$branch"
-        fi
+        git check-ref-format "refs/heads/$branch"
+        git check-ref-format "refs/heads/$BASE"
         api="${SERVER_URL%/}/api/v1/repos/$REPOSITORY/pulls"
         existing="$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" "$api?state=open&limit=100")"
         count="$(printf '%s' "$existing" | jq --arg branch "$branch" '[.[] | select(.head.ref == $branch)] | length')"
         [ "$count" -le 1 ] || { echo "More than one open release PR for $branch." >&2; exit 1; }
+        base_commit="$(git rev-parse HEAD)"
+        git fetch origin "refs/heads/$BASE"
+        [ "$base_commit" = "$(git rev-parse FETCH_HEAD)" ] || {
+          echo "Checkout is not the current base branch; rerun on $BASE." >&2; exit 1;
+        }
+        # Both the prepared index and an old release commit must stay inside
+        # the caller's explicit release paths. Never overwrite manual changes.
+        check_paths() {
+          while IFS= read -r changed; do
+            [ -n "$changed" ] || continue
+            allowed=false
+            while IFS= read -r release_path; do
+              [ -n "$release_path" ] || continue
+              release_path="${release_path%/}"
+              case "$changed" in
+                "$release_path"|"$release_path"/*) allowed=true; break ;;
+              esac
+            done <<EOF
+        $PATHS
+        EOF
+            [ "$allowed" = true ] || {
+              echo "Unexpected change outside release paths: $changed" >&2; exit 1;
+            }
+          done
+        }
+        while IFS= read -r release_path; do
+          [ -z "$release_path" ] || git --literal-pathspecs add -- "$release_path"
+        done <<EOF
+        $PATHS
+        EOF
+        git diff --cached --quiet && { echo "Prepared release files have no changes." >&2; exit 1; }
+        git -c core.quotePath=false diff --cached --name-only | check_paths
+        tree="$(git write-tree)"
+        # Empty lease also protects first creation from a concurrent creator.
+        previous=''
+        remote_refs="$(git ls-remote --heads origin "refs/heads/$branch")"
+        if [ -n "$remote_refs" ]; then
+          git fetch origin "refs/heads/$branch"
+          previous="$(git rev-parse FETCH_HEAD)"
+          ancestor="$(git merge-base "$base_commit" "$previous")"
+          [ "$(git rev-list --count "$ancestor..$previous")" = 1 ] &&
+            [ "$(git show -s --format=%s "$previous")" = "$COMMIT_MESSAGE" ] &&
+            [ "$(git show -s --format=%ae "$previous")" = 'forgejo-actions[bot]@users.noreply.git.7n.ai' ] || {
+              echo "Release branch is not a single automated release commit; refusing to replace it." >&2; exit 1;
+            }
+          git -c core.quotePath=false diff --name-only "$ancestor" "$previous" | check_paths
+        fi
+        if [ -n "$previous" ] &&
+          [ "$(git rev-parse "$previous^{tree}")" = "$tree" ] &&
+          [ "$(git rev-parse "$previous^")" = "$base_commit" ]; then
+          echo "Release branch already matches prepared files."
+        else
+          prepared="$(git commit-tree "$tree" -p "$base_commit" -m "$COMMIT_MESSAGE")"
+          printf 'Prepared release %s: previous=%s new=%s base=%s\n' "$branch" "$previous" "$prepared" "$base_commit"
+          git -c http.extraHeader="Authorization: Bearer $TOKEN" push \
+            --force-with-lease="refs/heads/$branch:$previous" origin "$prepared:refs/heads/$branch"
+        fi
         [ "$count" -eq 1 ] && exit 0
         body="Automated release preparation. Merging this PR creates tag $TAG and starts the release."
         payload="$(jq -cn --arg title "$COMMIT_MESSAGE" --arg head "$branch" --arg base "$BASE" --arg body "$body" '{title:$title,head:$head,base:$base,body:$body}')"

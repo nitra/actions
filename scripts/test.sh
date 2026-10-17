@@ -3,6 +3,8 @@ set -eu
 
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
+sh "$root/scripts/test-release-pr.sh"
+
 for action in "$root"/*/action.yml; do
   ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' "$action"
   ruby -ryaml -e '

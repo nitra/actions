@@ -32,7 +32,7 @@ These actions compose a Forgejo release pipeline. They require a runner with
 | --- | --- |
 | `conventional-release-version` | Calculate strict SemVer from conventional commits and Git tags. |
 | `cargo-set-package-version` | Update a package `Cargo.toml` and matching `Cargo.lock` entry safely. |
-| `forgejo-create-release-pr` | Create or reuse a versioned release branch and pull request. |
+| `forgejo-create-release-pr` | Create or refresh a versioned release branch and reuse its pull request. |
 | `forgejo-tag-and-dispatch` | Create an annotated release tag and dispatch its release workflow. |
 | `release-manifest` | Produce `SHA256SUMS` and `MANIFEST.txt` for explicit assets. |
 | `artifact-publish-release-assets` | Publish and verify immutable public Artifact Gateway assets. |
@@ -49,6 +49,16 @@ These actions compose a Forgejo release pipeline. They require a runner with
 there is no releasable commit. The other release actions mutate Git or Forgejo;
 use them only in workflows protected by an appropriately scoped OIDC
 integration.
+
+`forgejo-create-release-pr` requires a full-history checkout of the current base
+branch with prepared release files. Repeated preparation updates the same PR
+from that base, including newly consumed change files. An existing release
+branch must contain exactly one bot-authored commit with the expected subject,
+and both its diff and the prepared index must be limited to `paths` (literal
+file or directory names, one per line). Manual commits or unexpected paths
+cause failure. Updates use an explicit `--force-with-lease`; a concurrent branch
+change rejects the push. Identical preparations do not push a new commit.
+For deleted change files, pass their directory rather than the removed file.
 
 `forgejo-tag-and-dispatch` tags either a direct prepared release commit or a
 two-parent PR merge commit. For a merge commit, it requires exactly one commit
