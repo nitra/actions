@@ -46,9 +46,15 @@ These actions compose a Forgejo release pipeline. They require a runner with
 | `forgejo-publish-release` | Publish a release by tag. |
 
 `conventional-release-version` is read-only and returns `release=false` when
-there is no releasable commit. The other release actions mutate Git or Forgejo;
-use them only in workflows protected by an appropriately scoped OIDC
-integration.
+there is no releasable commit. Every refusal names the rejected input or state
+on stderr, and every non-obvious decision — an initial release because no tag is
+merged into `HEAD`, or `release=false` because no commit since the latest tag was
+`feat`, `fix`, `perf`, or breaking — is reported in the step log. It requires
+`current-version` to equal the latest release tag merged into `HEAD`, because it
+bumps the released version; a checkout without tags is reported as an initial
+release, so fetch the full history including tags. The other release actions
+mutate Git or Forgejo; use them only in workflows protected by an appropriately
+scoped OIDC integration.
 
 `forgejo-create-release-pr` requires a full-history checkout of the current base
 branch with prepared release files. Repeated preparation updates the same PR
