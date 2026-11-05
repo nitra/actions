@@ -4,6 +4,7 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 sh "$root/scripts/test-release-pr.sh"
+sh "$root/scripts/test-conventional-version.sh"
 
 for action in "$root"/*/action.yml; do
   ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' "$action"
@@ -26,17 +27,6 @@ git -C "$test_dir" tag v1.2.3
 printf '%s\n' change >> "$test_dir/file"
 git -C "$test_dir" add file
 git -C "$test_dir" commit -qm 'feat: test conventional version action'
-
-output="$test_dir/output"
-conventional_script="$(ruby -ryaml -e 'doc = YAML.load_file(ARGV.fetch(0)); puts doc.fetch("runs").fetch("steps").fetch(0).fetch("run")' "$root/conventional-release-version/action.yml")"
-(
-  cd "$test_dir"
-  CURRENT_VERSION=1.2.3 REQUESTED_VERSION='' TAG_PREFIX=v GITHUB_OUTPUT="$output" sh -c "$conventional_script"
-)
-grep -Fx 'release=true' "$output"
-grep -Fx 'version=1.3.0' "$output"
-grep -Fx 'tag=v1.3.0' "$output"
-grep -Fx 'bump=minor' "$output"
 
 version_script="$(ruby -ryaml -e 'doc = YAML.load_file(ARGV.fetch(0)); puts doc.fetch("runs").fetch("steps").fetch(0).fetch("run")' "$root/cargo-set-package-version/action.yml")"
 manifest="$test_dir/Cargo.toml"

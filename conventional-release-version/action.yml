@@ -40,12 +40,42 @@ runs:
         TAG_PREFIX: ${{ inputs.tag-prefix }}
       run: |
         set -eu
+        # Only % needs escaping to survive a workflow-command value; the
+        # messages below are single-line by construction.
+        escape_annotation() {
+          printf '%s' "$1" | sed 's/%/%25/g'
+        }
+        # Refusals go to stderr for the raw log and to ::error:: so the reason
+        # is visible on the job summary without opening the step.
+        die() {
+          annotation="conventional-release-version: $(escape_annotation "$1")"
+          printf 'conventional-release-version: %s\n' "$1" >&2
+          shift
+          for line in "$@"; do
+            printf '  %s\n' "$line" >&2
+            annotation="${annotation}%0A$(escape_annotation "$line")"
+          done
+          printf '::error::%s\n' "$annotation"
+          exit 1
+        }
+        note() {
+          printf 'conventional-release-version: %s\n' "$1"
+        }
+
         semver='[0-9]+\.[0-9]+\.[0-9]+'
-        printf '%s' "$CURRENT_VERSION" | grep -Eq "^${semver}$"
-        printf '%s' "$TAG_PREFIX" | grep -Eq '^[A-Za-z0-9_-]+$'
+        latest=''
+        printf '%s' "$CURRENT_VERSION" | grep -Eq "^${semver}$" ||
+          die "current-version '${CURRENT_VERSION}' is not a strict SemVer version." \
+            'Expected MAJOR.MINOR.PATCH with no prefix, suffix, or surrounding whitespace, such as 1.2.3.'
+        printf '%s' "$TAG_PREFIX" | grep -Eq '^[A-Za-z0-9_-]+$' ||
+          die "tag-prefix '${TAG_PREFIX}' is not a usable release tag prefix." \
+            'Expected one or more characters of [A-Za-z0-9_-], such as v; an empty prefix is not supported.'
 
         if [ -n "$REQUESTED_VERSION" ]; then
-          printf '%s' "$REQUESTED_VERSION" | grep -Eq "^${semver}$"
+          printf '%s' "$REQUESTED_VERSION" | grep -Eq "^${semver}$" ||
+            die "requested-version '${REQUESTED_VERSION}' is not a strict SemVer version." \
+              'Expected MAJOR.MINOR.PATCH with no prefix, suffix, or surrounding whitespace, such as 1.2.3.' \
+              'Leave requested-version empty to derive the version from conventional commits.'
           version="$REQUESTED_VERSION"
           bump=manual
         else
@@ -57,8 +87,22 @@ runs:
           if [ -z "$latest" ]; then
             version="$CURRENT_VERSION"
             bump=initial
+            note "No ${TAG_PREFIX}MAJOR.MINOR.PATCH tag is merged into HEAD; treating current-version ${version} as the initial release."
+            note 'If this repository already has release tags, this checkout is missing them: fetch the full history including tags.'
           else
-            test "$CURRENT_VERSION" = "${latest#"$TAG_PREFIX"}"
+            latest_version="${latest#"$TAG_PREFIX"}"
+            if [ "$CURRENT_VERSION" != "$latest_version" ]; then
+              if git rev-parse --verify --quiet "refs/tags/${TAG_PREFIX}${CURRENT_VERSION}" >/dev/null; then
+                detail="Tag ${TAG_PREFIX}${CURRENT_VERSION} exists but is not merged into HEAD; release from a branch that contains it."
+              else
+                detail="Tag ${TAG_PREFIX}${CURRENT_VERSION} does not exist; tag the released version, or set current-version to ${latest_version} and let this action compute the bump."
+              fi
+              die "current-version ${CURRENT_VERSION} does not match the latest release tag ${latest} merged into HEAD (version ${latest_version})." \
+                'This action bumps the released version, so current-version must equal that tag.' \
+                "$detail" \
+                "To release ${CURRENT_VERSION} as it stands, dispatch the release workflow manually (workflow_dispatch) with version=${CURRENT_VERSION}: an explicit requested-version bypasses this check." \
+                'Re-running tag-release will not help, because its gate needs a chore(release): commit that only a successful prepare-release-pr produces.'
+            fi
             subjects="$(git log "${latest}..HEAD" --format='%s')"
             messages="$(git log "${latest}..HEAD" --format='%B')"
             if printf '%s\n' "$messages" | grep -Eq 'BREAKING CHANGE:' || printf '%s\n' "$subjects" | grep -Eq '^[[:alnum:]][^[:space:]]*!:'; then
@@ -68,6 +112,7 @@ runs:
             elif printf '%s\n' "$subjects" | grep -Eq '^(fix|perf)(\([^)]*\))?:'; then
               bump=patch
             else
+              note "No feat, fix, perf, or breaking commit among $(git rev-list --count "${latest}..HEAD") commit(s) since ${latest}; no release."
               printf 'release=false\n' >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -83,5 +128,6 @@ runs:
           fi
         fi
 
+        note "Selected ${bump} release ${TAG_PREFIX}${version} from current-version ${CURRENT_VERSION}${latest:+ (latest release tag ${latest})}."
         printf 'release=true\nversion=%s\ntag=%s%s\nbump=%s\n' \
           "$version" "$TAG_PREFIX" "$version" "$bump" >> "$GITHUB_OUTPUT"
